@@ -109,3 +109,16 @@ logs/
 *.tmp
 *.temp
 .cache/
+
+# ============================================
+# Enrichment output - CONTAINS PERSONAL DATA
+# ============================================
+# Revealed names, emails and phone numbers of real people. This repository is
+# public; these must never be committed.
+enriched_contacts.csv
+enrichment_plan.json
+*_contacts.csv
+*_plan.json
+companies.xlsx
+companies.csv
+out/
