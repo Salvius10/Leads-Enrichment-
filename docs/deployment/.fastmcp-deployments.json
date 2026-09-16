@@ -1,0 +1,94 @@
+{
+  "version": "1.0.0",
+  "deployments": [
+    {
+      "id": "signalhire-fastmcp-cloud-prod-001",
+      "serverName": "signalhire-mcp",
+      "serverPath": "servers/business-productivity/signalhire",
+      "environment": "production",
+      "target": "fastmcp-cloud",
+      "url": "https://signalhire-mcp.fastmcp.app/mcp",
+      "healthEndpoint": "https://signalhire-mcp.fastmcp.app/health",
+      "status": "ready-to-deploy",
+      "preparedAt": "2025-11-02T22:49:41Z",
+      "deployedAt": null,
+      "deployedBy": null,
+      "version": "1.0.0",
+      "metadata": {
+        "gitCommit": "0f85f7532985300612856a6ddf7ffc70a8f402a3",
+        "gitBranch": "main",
+        "preparedBy": "fastmcp-deployment-agent"
+      },
+      "environmentVariables": [
+        {
+          "name": "SIGNALHIRE_API_KEY",
+          "required": true,
+          "isSet": false,
+          "source": "fastmcp-cloud-secrets",
+          "description": "API key for SignalHire service"
+        },
+        {
+          "name": "EXTERNAL_CALLBACK_URL",
+          "required": true,
+          "isSet": false,
+          "source": "fastmcp-cloud-secrets",
+          "description": "Public URL for webhook callbacks from SignalHire API"
+        },
+        {
+          "name": "SIGNALHIRE_API_BASE_URL",
+          "required": false,
+          "default": "https://www.signalhire.com",
+          "description": "Base URL for SignalHire API"
+        },
+        {
+          "name": "SIGNALHIRE_API_PREFIX",
+          "required": false,
+          "default": "/api/v1",
+          "description": "API prefix path"
+        },
+        {
+          "name": "MEM0_API_KEY",
+          "required": false,
+          "description": "API key for Mem0 semantic memory (optional)"
+        },
+        {
+          "name": "SUPABASE_URL",
+          "required": false,
+          "description": "Supabase project URL for persistent storage (optional)"
+        },
+        {
+          "name": "SUPABASE_KEY",
+          "required": false,
+          "description": "Supabase anonymous key (optional)"
+        }
+      ],
+      "validationResults": {
+        "preDeployment": {
+          "syntaxCheck": "passed",
+          "dependencyCheck": "passed",
+          "fastmcpJsonCheck": "passed",
+          "gitignoreCheck": "passed",
+          "timestamp": "2025-11-02T22:49:41Z",
+          "warnings": [
+            "Found 16 unpinned dependencies (recommend using == for production)",
+            "Found localhost references - may cause issues in production"
+          ]
+        },
+        "postDeployment": null
+      },
+      "notes": [
+        "Server requires external callback server for webhook handling",
+        "Callback server must be deployed separately (see EXTERNAL_CALLBACK_SETUP.md)",
+        "Set EXTERNAL_CALLBACK_URL to publicly accessible callback server URL",
+        "Optional: Configure Mem0 and Supabase for enhanced functionality"
+      ]
+    }
+  ],
+  "deploymentHistory": [],
+  "metadata": {
+    "lastUpdated": "2025-11-02T22:49:41Z",
+    "totalDeployments": 1,
+    "activeDeployments": 0,
+    "readyToDeployCount": 1
+  }
+}

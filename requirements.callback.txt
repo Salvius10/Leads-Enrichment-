@@ -1,0 +1,11 @@
+# Minimal requirements for SignalHire Callback Server (DigitalOcean deployment)
+# Only includes dependencies needed for the FastAPI callback server
+
+# Web framework
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+
+# Data validation
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+email-validator>=2.0.0

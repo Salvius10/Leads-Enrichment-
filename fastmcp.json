@@ -1,0 +1,74 @@
+{
+  "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
+  "name": "SignalHire MCP Server",
+  "version": "1.0.0",
+  "description": "FastMCP server for SignalHire API - contact enrichment and lead generation with 900M+ profiles",
+  "entryPoint": "server.py:mcp",
+  "source": {
+    "type": "filesystem",
+    "path": "server.py",
+    "entrypoint": "mcp"
+  },
+  "environment": {
+    "type": "uv",
+    "python": ">=3.10",
+    "requirements": "requirements.txt"
+  },
+  "deployment": {
+    "transport": "http",
+    "host": "0.0.0.0",
+    "port": 8000,
+    "path": "/mcp/",
+    "log_level": "INFO",
+    "env": {
+      "SIGNALHIRE_API_KEY": "${SIGNALHIRE_API_KEY}",
+      "SIGNALHIRE_API_BASE_URL": "${SIGNALHIRE_API_BASE_URL:-https://www.signalhire.com}",
+      "SIGNALHIRE_API_PREFIX": "${SIGNALHIRE_API_PREFIX:-/api/v1}",
+      "EXTERNAL_CALLBACK_URL": "${EXTERNAL_CALLBACK_URL}",
+      "CALLBACK_SERVER_HOST": "${CALLBACK_SERVER_HOST:-0.0.0.0}",
+      "CALLBACK_SERVER_PORT": "${CALLBACK_SERVER_PORT:-8000}",
+      "MEM0_API_KEY": "${MEM0_API_KEY:-}",
+      "SUPABASE_URL": "${SUPABASE_URL:-}",
+      "SUPABASE_KEY": "${SUPABASE_KEY:-}"
+    }
+  },
+  "env": [
+    {
+      "name": "SIGNALHIRE_API_KEY",
+      "description": "API key for SignalHire service",
+      "required": true
+    },
+    {
+      "name": "EXTERNAL_CALLBACK_URL",
+      "description": "Public URL for webhook callbacks from SignalHire API",
+      "required": true
+    },
+    {
+      "name": "SIGNALHIRE_API_BASE_URL",
+      "description": "Base URL for SignalHire API",
+      "required": false,
+      "default": "https://www.signalhire.com"
+    },
+    {
+      "name": "SIGNALHIRE_API_PREFIX",
+      "description": "API prefix path",
+      "required": false,
+      "default": "/api/v1"
+    },
+    {
+      "name": "MEM0_API_KEY",
+      "description": "API key for Mem0 semantic memory (optional)",
+      "required": false
+    },
+    {
+      "name": "SUPABASE_URL",
+      "description": "Supabase project URL for persistent storage (optional)",
+      "required": false
+    },
+    {
+      "name": "SUPABASE_KEY",
+      "description": "Supabase anonymous key (optional)",
+      "required": false
+    }
+  ]
+}
