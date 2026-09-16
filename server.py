@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
@@ -78,6 +79,9 @@ class AppState:
     client: SignalHireClient | None = None
     callback_server: CallbackServer | None = None
     cache: ContactCache | None = None
+    # request_id -> completed reveal payload. The contact cache is keyed by uid,
+    # so it cannot answer "is request X done?" on its own.
+    results: dict = {}
 
 state = AppState()
 
@@ -95,6 +99,66 @@ def get_callback_url() -> str:
     if state.callback_server:
         return state.callback_server.get_callback_url()
     raise RuntimeError("No callback server configured")
+
+
+def _items_to_dicts(callback_data) -> list[dict]:
+    """Serialize PersonCallbackItem objects to plain dicts."""
+    out = []
+    for item in callback_data:
+        try:
+            out.append(item.model_dump(mode="json", by_alias=True, exclude_none=True))
+        except AttributeError:
+            out.append(dict(item))
+    return out
+
+
+def _cache_contacts(callback_data) -> None:
+    """Write revealed contacts into the uid-keyed cache.
+
+    Registered globally so results survive even if the per-request handler was
+    not registered in time (the webhook can in principle beat the registration).
+    """
+    if not state.cache:
+        return
+    for item in callback_data:
+        candidate = getattr(item, "candidate", None)
+        if getattr(item, "status", None) != "success" or candidate is None:
+            continue
+        payload = candidate.model_dump(mode="json", by_alias=True, exclude_none=True)
+        uid = payload.get("uid")
+        if not uid:
+            continue
+        state.cache.update_from_reveal_payload(uid, payload, profile=payload)
+    try:
+        state.cache.save()
+    except Exception as exc:  # noqa: BLE001
+        _log(f"⚠️  Failed to persist contact cache: {exc}")
+
+
+def _store_reveal_result(request_id, callback_data) -> None:
+    """Record a completed reveal so get_request_status() can report it."""
+    items = _items_to_dicts(callback_data)
+    state.results[str(request_id)] = {
+        "status": "completed",
+        "received_at": datetime.now(timezone.utc).isoformat(),
+        "items": items,
+    }
+    _cache_contacts(callback_data)
+    _log(f"📥 Stored reveal result for {request_id} ({len(items)} item(s))")
+
+
+def _track_request(request_id) -> None:
+    """Register the one-time handler for a submitted reveal request.
+
+    The API returns the id as an int, but it comes back as a string in the
+    Request-Id header, so both the handler map and the results store are keyed by
+    str -- otherwise the lookup in _process_callback never matches.
+    """
+    if not request_id or not state.callback_server:
+        return
+    key = str(request_id)
+    state.results[key] = {"status": "processing", "items": []}
+    state.callback_server.register_request_handler(key, _store_reveal_result)
 
 
 @asynccontextmanager
@@ -116,10 +180,17 @@ async def lifespan(app):
     # Check if using external callback server (DigitalOcean)
     external_callback_url = os.getenv("EXTERNAL_CALLBACK_URL")
 
+    # EXTERNAL_CALLBACK_URL only decides which URL we advertise to SignalHire; it
+    # must not decide whether we listen. A tunnel (ngrok) terminates at this local
+    # listener, and get_request_status() reads results out of this process's cache,
+    # so the listener has to run even when an external URL is advertised. Set
+    # DISABLE_LOCAL_CALLBACK_SERVER=1 for a genuinely remote callback host.
     if external_callback_url:
-        # Using external callback server (e.g., DigitalOcean)
-        _log(f"✅ Using external callback server: {external_callback_url}")
-        state.callback_server = None  # No local server needed
+        _log(f"✅ Advertising external callback URL: {external_callback_url}")
+
+    if os.getenv("DISABLE_LOCAL_CALLBACK_SERVER", "").strip() in ("1", "true", "yes"):
+        _log("ℹ️  Local callback listener disabled by DISABLE_LOCAL_CALLBACK_SERVER")
+        state.callback_server = None
     else:
         # Start local callback server
         state.callback_server = get_server(
@@ -131,6 +202,11 @@ async def lifespan(app):
 
     # Initialize contact cache
     state.cache = ContactCache()
+
+    # Nothing else registers a handler, so without this every webhook payload is
+    # logged and then dropped on the floor.
+    if state.callback_server:
+        state.callback_server.register_handler("cache_contacts", _cache_contacts)
 
     _log("✅ SignalHire MCP Server started successfully")
 
@@ -317,7 +393,15 @@ async def reveal_contact(
     if not response.success:
         raise ValueError(f"Reveal failed: {response.error}")
 
-    request_id = response.data.get("request_id")
+    # The Person API returns camelCase "requestId"; the batch client normalizes to
+    # "request_id". Accept either, or single reveals hand back a null id and the
+    # result can never be correlated to the request.
+    data = response.data or {}
+    # Returned as a str so it can be passed straight back into
+    # get_request_status(request_id: str) without a type error.
+    request_id = data.get("requestId") or data.get("request_id")
+    request_id = str(request_id) if request_id is not None else None
+    _track_request(request_id)
     await ctx.info(f"Reveal request submitted: {request_id}")
 
     return {
@@ -368,8 +452,12 @@ async def batch_reveal_contacts(
 
     await ctx.report_progress(len(identifiers), len(identifiers), "Batch reveal submitted")
 
+    batch_request_id = response.data.get("request_id")
+    batch_request_id = str(batch_request_id) if batch_request_id is not None else None
+    _track_request(batch_request_id)
+
     return {
-        "request_id": response.data.get("request_id"),
+        "request_id": batch_request_id,
         "count": len(identifiers),
         "status": "processing",
         "message": "Batch processing started - results will be sent to webhook"
@@ -676,6 +764,18 @@ async def get_request_status(
     This tool checks local tracking state for the given request ID.
     """
     await ctx.info(f"Checking status for request: {request_id}")
+
+    # Completed results land here via the registered callback handler
+    record = state.results.get(str(request_id))
+    if record and record.get("status") == "completed":
+        items = record["items"]
+        return {
+            "request_id": request_id,
+            "status": "completed",
+            "received_at": record.get("received_at"),
+            "item_count": len(items),
+            "results": items,
+        }
 
     # Check if callback server has pending handler for this request
     if state.callback_server and request_id in state.callback_server._request_handlers:

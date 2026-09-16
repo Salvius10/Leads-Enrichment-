@@ -14,11 +14,21 @@ class PersonPhoto(BaseModel):
 
 
 class PersonContact(BaseModel):
-    type: Literal["email", "phone"] = Field(..., description="Contact type")
+    """A revealed contact method.
+
+    Shapes below are what the Person API actually sends, which is looser than the
+    docs suggest: `type` includes values beyond email/phone (skype, telegram,
+    ...), `rating` arrives as an int, and `subType` is frequently null. Tightening
+    any of these makes every callback fail validation with a 422.
+    """
+
+    model_config = {"extra": "allow", "populate_by_name": True}
+
+    type: str = Field(..., description="Contact type: email, phone, skype, ...")
     value: str = Field(..., description="Contact value")
-    rating: str = Field(..., description="Contact rating")
-    sub_type: str = Field(
-        ...,
+    rating: int | str | None = Field(None, description="Contact rating")
+    sub_type: str | None = Field(
+        None,
         description="Contact subtype like work, personal, work_phone",
         alias="subType",
     )
@@ -26,9 +36,12 @@ class PersonContact(BaseModel):
 
 
 class PersonSocial(BaseModel):
+    model_config = {"extra": "allow"}
+
     type: str = Field(..., description="Social platform type like li, fb, tw")
     link: HttpUrl = Field(..., description="Social profile link")
-    rating: str = Field(..., description="Social profile rating")
+    # Sent as an int by the live API, same as PersonContact.rating.
+    rating: int | str | None = Field(None, description="Social profile rating")
 
 
 class PersonLanguage(BaseModel):
