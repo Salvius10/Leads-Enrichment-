@@ -258,21 +258,78 @@ def pick_for_company(profiles: list[dict], company: str, limit: int,
     return picks[:limit]
 
 
-def load_companies(path: Path) -> list[tuple[str, str]]:
-    """Read "Company" or "Company | Location" lines.
+# Column headers accepted for each field, matched case-insensitively.
+COMPANY_COLUMNS = {"company", "company name", "companies", "company_name",
+                   "name", "organisation", "organization", "account", "employer"}
+LOCATION_COLUMNS = {"location", "city", "region", "place", "country", "hq"}
 
-    A location is the only reliable way to disambiguate short company names --
-    "CRED" matches both the Bangalore fintech and an unrelated UK company, and
-    no amount of name matching can separate them.
+
+def _pick_column(columns: list[str], wanted: set[str]) -> str | None:
+    for column in columns:
+        if str(column).strip().lower() in wanted:
+            return column
+    return None
+
+
+def load_companies(path: Path, default_location: str) -> list[tuple[str, str]]:
+    """Read company names from .xlsx/.xls, .csv or a plain .txt list.
+
+    Excel and CSV: uses a column named Company (or Name, Organisation, ...) if
+    one is present, otherwise the first column. An optional Location column
+    overrides the default for that row. Text files take one company per line,
+    optionally "Company | Location".
+
+    Every company gets `default_location` unless its row says otherwise. A
+    location is worth overriding for short, ambiguous names -- searching "CRED"
+    across all of India returns unrelated people with CEO titles, while
+    "Bengaluru, India" returns the actual company.
     """
-    entries = []
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        name, _, location = line.partition("|")
-        entries.append((name.strip(), location.strip()))
-    return entries
+    suffix = path.suffix.lower()
+    entries: list[tuple[str, str]] = []
+
+    if suffix in {".xlsx", ".xlsm", ".xls", ".csv"}:
+        import pandas as pd
+
+        if suffix == ".csv":
+            frame = pd.read_csv(path, dtype=str)
+        else:
+            frame = pd.read_excel(path, dtype=str)
+        if frame.empty:
+            return []
+
+        columns = list(frame.columns)
+        company_col = _pick_column(columns, COMPANY_COLUMNS) or columns[0]
+        location_col = _pick_column(columns, LOCATION_COLUMNS)
+
+        for _, row in frame.iterrows():
+            name = str(row.get(company_col) or "").strip()
+            if not name or name.lower() == "nan":
+                continue
+            location = ""
+            if location_col:
+                location = str(row.get(location_col) or "").strip()
+                if location.lower() == "nan":
+                    location = ""
+            entries.append((name, location or default_location))
+    else:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            name, _, location = line.partition("|")
+            name = name.strip()
+            if name:
+                entries.append((name, location.strip() or default_location))
+
+    # De-duplicate, keeping the first occurrence so a repeated company is not
+    # searched (and revealed) twice.
+    seen, unique = set(), []
+    for name, location in entries:
+        key = name.casefold()
+        if key not in seen:
+            seen.add(key)
+            unique.append((name, location))
+    return unique
 
 
 def read_cache() -> dict:
@@ -436,7 +493,8 @@ def build_rows(picks: list[dict]) -> list[dict]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("companies", type=Path, help="text file, one company per line")
+    parser.add_argument("companies", type=Path,
+                        help="Excel (.xlsx), CSV or text file of company names")
     parser.add_argument("--dry-run", action="store_true",
                         help="show who would be revealed; spends nothing")
     parser.add_argument("--reveal", action="store_true",
@@ -448,6 +506,9 @@ def main() -> None:
     parser.add_argument("--size", type=int, default=25,
                         help="results per search page (default 25; larger pages "
                              "exceed the server's 100KB response cap)")
+    parser.add_argument("--location", default="India",
+                        help="location filter applied to every company unless its "
+                             "row overrides it (default: India; pass \"\" to disable)")
     parser.add_argument("--loose-company", action="store_true",
                         help="also accept employers that merely start with the "
                              "target name (recovers 'Razorpay Singapore', but "
@@ -469,11 +530,14 @@ def main() -> None:
     if not args.companies.exists():
         parser.error(f"no such file: {args.companies}")
 
-    companies = load_companies(args.companies)
+    companies = load_companies(args.companies, args.location.strip())
     if not companies:
         parser.error("company file is empty")
-    located = sum(1 for _, loc in companies if loc)
-    print(f"{len(companies)} companies, up to {args.per_company} contacts each\n")
+    overridden = sum(1 for _, loc in companies if loc != args.location.strip())
+    scope = args.location.strip() or "no location filter"
+    print(f"{len(companies)} companies, up to {args.per_company} contacts each "
+          f"({scope}"
+          + (f", {overridden} overridden" if overridden else "") + ")\n")
 
     if args.collect:
         if not args.plan.exists():
