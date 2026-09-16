@@ -29,6 +29,7 @@ import re
 import subprocess
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -111,6 +112,21 @@ LEGAL_SUFFIXES = re.compile(
     r"solutions|systems|services|group|holdings|india|global)\b",
     re.I,
 )
+
+
+def is_latin_name(name: str) -> bool:
+    """True if every letter in the name is written in Latin script.
+
+    Search returns some profiles under their native spelling ("Tomonaga
+    Tejima ..."), which are not the leads these lists are after. Accented
+    Latin names ("Jose Garcia" with its real diacritics) are kept -- only
+    other scripts (CJK, Cyrillic, Devanagari, Arabic) are dropped.
+    """
+    return all(
+        unicodedata.name(char, "").startswith("LATIN")
+        for char in name
+        if char.isalpha()
+    )
 
 
 def normalize_company(name: str) -> str:
@@ -224,6 +240,8 @@ def pick_for_company(profiles: list[dict], company: str, limit: int,
     for prof in profiles:
         experience = prof.get("experience") or []
         if not experience:
+            continue
+        if not is_latin_name(prof.get("fullName", "")):
             continue
         # Spam listings name themselves after the company ("Meesho Lucky Draw
         # Head Office"); a real person's name does not contain their employer.
@@ -523,6 +541,10 @@ def main() -> None:
                         help="seconds between searches (default 0.5)")
     parser.add_argument("--out", type=Path, default=REPO / "enriched_contacts.csv")
     parser.add_argument("--plan", type=Path, default=REPO / "enrichment_plan.json")
+    # Latin-script names can still carry characters the Windows console's
+    # cp1252 default cannot encode; never let printing abort a run.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     args = parser.parse_args()
 
     if not (args.dry_run or args.reveal or args.collect):
