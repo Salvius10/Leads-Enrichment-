@@ -9,9 +9,12 @@ and provides a simple interface for starting/stopping the server.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import uvicorn
@@ -71,11 +74,28 @@ class CallbackServer:
                         status_code=400, detail="Missing Request-Id header"
                     )
 
-                # Parse callback data
+                # Parse callback data.
+                #
+                # Validate item by item rather than all-or-nothing. The credits
+                # for these results are already spent, so one unexpected field in
+                # one person must not discard the rest of the batch. Anything
+                # that will not parse is written to a dead-letter file so it can
+                # be recovered by hand instead of being lost to a 422.
                 raw_data = await request.json()
-                callback_data = [
-                    PersonCallbackItem.model_validate(item) for item in raw_data
-                ]
+                callback_data = []
+                rejected = []
+                for item in raw_data:
+                    try:
+                        callback_data.append(PersonCallbackItem.model_validate(item))
+                    except ValidationError as exc:
+                        rejected.append({"item": item, "error": str(exc)})
+
+                if rejected:
+                    logger.error(
+                        f"{len(rejected)} of {len(raw_data)} callback items failed "
+                        f"validation for request {request_id}"
+                    )
+                    self._write_dead_letter(request_id, rejected)
 
                 logger.info(
                     f"Received callback for request {request_id} with {len(callback_data)} items"
@@ -121,6 +141,18 @@ class CallbackServer:
 
         self.app = app
         return app
+
+    def _write_dead_letter(self, request_id: str, rejected: list) -> None:
+        """Persist callback items we could not parse, for manual recovery."""
+        try:
+            path = Path.home() / ".signalhire-agent" / "dead-letter"
+            path.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+            target = path / f"{request_id}-{stamp}.json"
+            target.write_text(json.dumps(rejected, indent=2), encoding="utf-8")
+            logger.error(f"Unparsed callback items written to {target}")
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"Could not write dead-letter file: {exc}")
 
     async def _process_callback(
         self, request_id: str, callback_data: PersonCallbackData

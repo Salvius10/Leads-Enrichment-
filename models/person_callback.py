@@ -5,12 +5,20 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, HttpUrl
 
 
+# Every field the live API can send as null or omit is optional here. A required
+# field that the API leaves empty fails the whole callback with a 422, and the
+# credits for that reveal are already spent -- strictness costs money.
 class PersonLocation(BaseModel):
-    name: str = Field(..., description="Location name")
+    model_config = {"extra": "allow"}
+
+    name: str | None = Field(None, description="Location name")
 
 
 class PersonPhoto(BaseModel):
-    url: HttpUrl = Field(..., description="Photo URL")
+    model_config = {"extra": "allow"}
+
+    # Plain str, not HttpUrl: a malformed URL should not void the payload.
+    url: str | None = Field(None, description="Photo URL")
 
 
 class PersonContact(BaseModel):
@@ -38,15 +46,18 @@ class PersonContact(BaseModel):
 class PersonSocial(BaseModel):
     model_config = {"extra": "allow"}
 
-    type: str = Field(..., description="Social platform type like li, fb, tw")
-    link: HttpUrl = Field(..., description="Social profile link")
+    type: str | None = Field(None, description="Social platform type like li, fb, tw")
+    link: str | None = Field(None, description="Social profile link")
     # Sent as an int by the live API, same as PersonContact.rating.
     rating: int | str | None = Field(None, description="Social profile rating")
 
 
 class PersonLanguage(BaseModel):
-    name: str = Field(..., description="Language name")
-    proficiency: str = Field(..., description="Language proficiency level")
+    model_config = {"extra": "allow"}
+
+    name: str | None = Field(None, description="Language name")
+    # Routinely null in live payloads.
+    proficiency: str | None = Field(None, description="Language proficiency level")
 
 
 class PersonCandidate(BaseModel):
